@@ -10,6 +10,7 @@ package text
 import (
 	"reflect"
 	"unicode"
+	"unsafe"
 
 	"github.com/pgavlin/text/internal/bytealg"
 	"github.com/pgavlin/text/utf8"
@@ -26,6 +27,18 @@ func Empty[S String]() S {
 
 func IsEmpty[S String](s S) bool {
 	return len(s) == 0
+}
+
+func ToRunes[S String](s S) []rune {
+	return []rune(bytealg.AsString(s))
+}
+
+func ToString[S String](r []rune) S {
+	s := string(r)
+	if isString[S]() {
+		return S(s)
+	}
+	return S(unsafe.Slice(unsafe.StringData(s), len(s)))
 }
 
 func isString[S String]() bool {
