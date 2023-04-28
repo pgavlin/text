@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings
+package text
 
-func (r *Replacer) Replacer() any {
+func (r *Replacer[S]) Replacer() any {
 	r.once.Do(r.buildOnce)
 	return r.r
 }
 
-func (r *Replacer) PrintTrie() string {
+func (r *Replacer[S]) PrintTrie() string {
 	r.once.Do(r.buildOnce)
-	gen := r.r.(*genericReplacer)
+	gen := r.r.(*genericReplacer[S])
 	return gen.printNode(&gen.root, 0)
 }
 
-func (r *genericReplacer) printNode(t *trieNode, depth int) (s string) {
+func (r *genericReplacer[S]) printNode(t *trieNode[S], depth int) (s string) {
 	if t.priority > 0 {
 		s += "+"
 	} else {
@@ -23,8 +23,8 @@ func (r *genericReplacer) printNode(t *trieNode, depth int) (s string) {
 	}
 	s += "\n"
 
-	if t.prefix != "" {
-		s += Repeat(".", depth) + t.prefix
+	if !IsEmpty(t.prefix) {
+		s += Concat(Repeat(".", depth), t.prefix)
 		s += r.printNode(t.next, depth+len(t.prefix))
 	} else if t.table != nil {
 		for b, m := range r.mapping {

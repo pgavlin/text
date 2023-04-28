@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings
+package text
 
 import (
 	"io"
@@ -11,16 +11,16 @@ import (
 
 // Replacer replaces a list of strings with replacements.
 // It is safe for concurrent use by multiple goroutines.
-type Replacer struct {
+type Replacer[S String] struct {
 	once   sync.Once // guards buildOnce method
-	r      replacer
-	oldnew []string
+	r      replacer[S]
+	oldnew []S
 }
 
 // replacer is the interface that a replacement algorithm needs to implement.
-type replacer interface {
-	Replace(s string) string
-	WriteString(w io.Writer, s string) (n int, err error)
+type replacer[S String] interface {
+	Replace(s S) S
+	WriteString(w io.Writer, s S) (n int, err error)
 }
 
 // NewReplacer returns a new Replacer from a list of old, new string
@@ -29,19 +29,19 @@ type replacer interface {
 // comparisons are done in argument order.
 //
 // NewReplacer panics if given an odd number of arguments.
-func NewReplacer(oldnew ...string) *Replacer {
+func NewReplacer[S String](oldnew ...S) *Replacer[S] {
 	if len(oldnew)%2 == 1 {
 		panic("strings.NewReplacer: odd argument count")
 	}
-	return &Replacer{oldnew: append([]string(nil), oldnew...)}
+	return &Replacer[S]{oldnew: append([]S(nil), oldnew...)}
 }
 
-func (r *Replacer) buildOnce() {
+func (r *Replacer[S]) buildOnce() {
 	r.r = r.build()
 	r.oldnew = nil
 }
 
-func (b *Replacer) build() replacer {
+func (b *Replacer[S]) build() replacer[S] {
 	oldnew := b.oldnew
 	if len(oldnew) == 2 && len(oldnew[0]) > 1 {
 		return makeSingleStringReplacer(oldnew[0], oldnew[1])
@@ -58,21 +58,21 @@ func (b *Replacer) build() replacer {
 	}
 
 	if allNewBytes {
-		r := byteReplacer{}
-		for i := range r {
-			r[i] = byte(i)
+		r := byteReplacer[S]{}
+		for i := range r.m {
+			r.m[i] = byte(i)
 		}
 		// The first occurrence of old->new map takes precedence
 		// over the others with the same old string.
 		for i := len(oldnew) - 2; i >= 0; i -= 2 {
 			o := oldnew[i][0]
 			n := oldnew[i+1][0]
-			r[o] = n
+			r.m[o] = n
 		}
 		return &r
 	}
 
-	r := byteStringReplacer{toReplace: make([]string, 0, len(oldnew)/2)}
+	r := byteStringReplacer[S]{toReplace: make([]S, 0, len(oldnew)/2)}
 	// The first occurrence of old->new map takes precedence
 	// over the others with the same old string.
 	for i := len(oldnew) - 2; i >= 0; i -= 2 {
@@ -83,7 +83,7 @@ func (b *Replacer) build() replacer {
 			// We need to use string([]byte{o}) instead of string(o),
 			// to avoid utf8 encoding of o.
 			// E. g. byte(150) produces string of length 2.
-			r.toReplace = append(r.toReplace, string([]byte{o}))
+			r.toReplace = append(r.toReplace, S([]byte{o}))
 		}
 		r.replacements[o] = []byte(n)
 
@@ -92,13 +92,13 @@ func (b *Replacer) build() replacer {
 }
 
 // Replace returns a copy of s with all replacements performed.
-func (r *Replacer) Replace(s string) string {
+func (r *Replacer[S]) Replace(s S) S {
 	r.once.Do(r.buildOnce)
 	return r.r.Replace(s)
 }
 
 // WriteString writes s to w with all replacements performed.
-func (r *Replacer) WriteString(w io.Writer, s string) (n int, err error) {
+func (r *Replacer[S]) WriteString(w io.Writer, s S) (n int, err error) {
 	r.once.Do(r.buildOnce)
 	return r.r.WriteString(w, s)
 }
@@ -120,10 +120,10 @@ func (r *Replacer) WriteString(w io.Writer, s string) (n int, err error) {
 // n2 and n3; n4's child is n5; n6's child is n7. Nodes n0, n1 and n4 (marked
 // with a trailing "-") are partial keys, and nodes n2, n3, n5, n6 and n7
 // (marked with a trailing "+") are complete keys.
-type trieNode struct {
+type trieNode[S String] struct {
 	// value is the value of the trie node's key/value pair. It is empty if
 	// this node is not a complete key.
-	value string
+	value S
 	// priority is the priority (higher is more important) of the trie node's
 	// key/value pair; keys are not necessarily matched shortest- or longest-
 	// first. Priority is positive if this node is a complete key, and zero
@@ -142,21 +142,21 @@ type trieNode struct {
 	// prefix is the difference in keys between this trie node and the next.
 	// In the example above, node n4 has prefix "cbc" and n4's next node is n5.
 	// Node n5 has no children and so has zero prefix, next and table fields.
-	prefix string
-	next   *trieNode
+	prefix S
+	next   *trieNode[S]
 
 	// table is a lookup table indexed by the next byte in the key, after
 	// remapping that byte through genericReplacer.mapping to create a dense
 	// index. In the example above, the keys only use 'a', 'b', 'c', 'x' and
 	// 'y', which remap to 0, 1, 2, 3 and 4. All other bytes remap to 5, and
 	// genericReplacer.tableSize will be 5. Node n0's table will be
-	// []*trieNode{ 0:n1, 1:n4, 3:n6 }, where the 0, 1 and 3 are the remapped
+	// []*trieNode[S]{ 0:n1, 1:n4, 3:n6 }, where the 0, 1 and 3 are the remapped
 	// 'a', 'b' and 'x'.
-	table []*trieNode
+	table []*trieNode[S]
 }
 
-func (t *trieNode) add(key, val string, priority int, r *genericReplacer) {
-	if key == "" {
+func (t *trieNode[S]) add(key, val S, priority int, r *genericReplacer[S]) {
+	if IsEmpty(key) {
 		if t.priority == 0 {
 			t.value = val
 			t.priority = priority
@@ -164,7 +164,7 @@ func (t *trieNode) add(key, val string, priority int, r *genericReplacer) {
 		return
 	}
 
-	if t.prefix != "" {
+	if !IsEmpty(t.prefix) {
 		// Need to split the prefix among multiple nodes.
 		var n int // length of the longest common prefix
 		for ; n < len(t.prefix) && n < len(key); n++ {
@@ -178,25 +178,25 @@ func (t *trieNode) add(key, val string, priority int, r *genericReplacer) {
 			// First byte differs, start a new lookup table here. Looking up
 			// what is currently t.prefix[0] will lead to prefixNode, and
 			// looking up key[0] will lead to keyNode.
-			var prefixNode *trieNode
+			var prefixNode *trieNode[S]
 			if len(t.prefix) == 1 {
 				prefixNode = t.next
 			} else {
-				prefixNode = &trieNode{
+				prefixNode = &trieNode[S]{
 					prefix: t.prefix[1:],
 					next:   t.next,
 				}
 			}
-			keyNode := new(trieNode)
-			t.table = make([]*trieNode, r.tableSize)
+			keyNode := new(trieNode[S])
+			t.table = make([]*trieNode[S], r.tableSize)
 			t.table[r.mapping[t.prefix[0]]] = prefixNode
 			t.table[r.mapping[key[0]]] = keyNode
-			t.prefix = ""
+			t.prefix = Empty[S]()
 			t.next = nil
 			keyNode.add(key[1:], val, priority, r)
 		} else {
 			// Insert new node after the common section of the prefix.
-			next := &trieNode{
+			next := &trieNode[S]{
 				prefix: t.prefix[n:],
 				next:   t.next,
 			}
@@ -208,17 +208,17 @@ func (t *trieNode) add(key, val string, priority int, r *genericReplacer) {
 		// Insert into existing table.
 		m := r.mapping[key[0]]
 		if t.table[m] == nil {
-			t.table[m] = new(trieNode)
+			t.table[m] = new(trieNode[S])
 		}
 		t.table[m].add(key[1:], val, priority, r)
 	} else {
 		t.prefix = key
-		t.next = new(trieNode)
-		t.next.add("", val, priority, r)
+		t.next = new(trieNode[S])
+		t.next.add(Empty[S](), val, priority, r)
 	}
 }
 
-func (r *genericReplacer) lookup(s string, ignoreRoot bool) (val string, keylen int, found bool) {
+func (r *genericReplacer[S]) lookup(s S, ignoreRoot bool) (val S, keylen int, found bool) {
 	// Iterate down the trie to the end, and grab the value and keylen with
 	// the highest priority.
 	bestPriority := 0
@@ -232,7 +232,7 @@ func (r *genericReplacer) lookup(s string, ignoreRoot bool) (val string, keylen 
 			found = true
 		}
 
-		if s == "" {
+		if IsEmpty(s) {
 			break
 		}
 		if node.table != nil {
@@ -243,7 +243,7 @@ func (r *genericReplacer) lookup(s string, ignoreRoot bool) (val string, keylen 
 			node = node.table[index]
 			s = s[1:]
 			n++
-		} else if node.prefix != "" && HasPrefix(s, node.prefix) {
+		} else if len(node.prefix) != 0 && HasPrefix(s, node.prefix) {
 			n += len(node.prefix)
 			s = s[len(node.prefix):]
 			node = node.next
@@ -256,17 +256,17 @@ func (r *genericReplacer) lookup(s string, ignoreRoot bool) (val string, keylen 
 
 // genericReplacer is the fully generic algorithm.
 // It's used as a fallback when nothing faster can be used.
-type genericReplacer struct {
-	root trieNode
+type genericReplacer[S String] struct {
+	root trieNode[S]
 	// tableSize is the size of a trie node's lookup table. It is the number
 	// of unique key bytes.
 	tableSize int
-	// mapping maps from key bytes to a dense index for trieNode.table.
+	// mapping maps from key bytes to a dense index for trieNode[S].table.
 	mapping [256]byte
 }
 
-func makeGenericReplacer(oldnew []string) *genericReplacer {
-	r := new(genericReplacer)
+func makeGenericReplacer[S String](oldnew []S) *genericReplacer[S] {
+	r := new(genericReplacer[S])
 	// Find each byte used, then assign them each an index.
 	for i := 0; i < len(oldnew); i += 2 {
 		key := oldnew[i]
@@ -289,7 +289,7 @@ func makeGenericReplacer(oldnew []string) *genericReplacer {
 		}
 	}
 	// Ensure root node uses a lookup table (for performance).
-	r.root.table = make([]*trieNode, r.tableSize)
+	r.root.table = make([]*trieNode[S], r.tableSize)
 
 	for i := 0; i < len(oldnew); i += 2 {
 		r.root.add(oldnew[i], oldnew[i+1], len(oldnew)-i, r)
@@ -297,44 +297,56 @@ func makeGenericReplacer(oldnew []string) *genericReplacer {
 	return r
 }
 
-type appendSliceWriter []byte
+type appendSliceWriter[S String] struct {
+	b []byte
+}
 
 // Write writes to the buffer to satisfy io.Writer.
-func (w *appendSliceWriter) Write(p []byte) (int, error) {
-	*w = append(*w, p...)
+func (w *appendSliceWriter[S]) Write(p []byte) (int, error) {
+	w.b = append(w.b, p...)
 	return len(p), nil
 }
 
 // WriteString writes to the buffer without string->[]byte->string allocations.
-func (w *appendSliceWriter) WriteString(s string) (int, error) {
-	*w = append(*w, s...)
+func (w *appendSliceWriter[S]) WriteString(s string) (int, error) {
+	w.b = append(w.b, s...)
 	return len(s), nil
 }
 
-type stringWriter struct {
+// WriteText writes to the buffer without string->[]byte->string allocations.
+func (w *appendSliceWriter[S]) WriteText(s S) (int, error) {
+	w.b = append(w.b, s...)
+	return len(s), nil
+}
+
+type textWriter[S String] struct {
 	w io.Writer
 }
 
-func (w stringWriter) WriteString(s string) (int, error) {
+func (w textWriter[S]) WriteText(s S) (int, error) {
 	return w.w.Write([]byte(s))
 }
 
-func getStringWriter(w io.Writer) io.StringWriter {
-	sw, ok := w.(io.StringWriter)
-	if !ok {
-		sw = stringWriter{w}
+func getTextWriter[S String](w io.Writer) Writer[S] {
+	tw, ok := w.(Writer[S])
+	if ok {
+		return tw
 	}
-	return sw
+	sw, ok := w.(io.StringWriter)
+	if ok {
+		return AsWriter[S](sw)
+	}
+	return textWriter[S]{w: w}
 }
 
-func (r *genericReplacer) Replace(s string) string {
-	buf := make(appendSliceWriter, 0, len(s))
-	r.WriteString(&buf, s)
-	return string(buf)
+func (r *genericReplacer[S]) Replace(s S) S {
+	w := appendSliceWriter[S]{b: make([]byte, 0, len(s))}
+	r.WriteString(&w, s)
+	return S(w.b)
 }
 
-func (r *genericReplacer) WriteString(w io.Writer, s string) (n int, err error) {
-	sw := getStringWriter(w)
+func (r *genericReplacer[S]) WriteString(w io.Writer, s S) (n int, err error) {
+	sw := getTextWriter[S](w)
 	var last, wn int
 	var prevMatchEmpty bool
 	for i := 0; i <= len(s); {
@@ -351,12 +363,12 @@ func (r *genericReplacer) WriteString(w io.Writer, s string) (n int, err error) 
 		val, keylen, match := r.lookup(s[i:], prevMatchEmpty)
 		prevMatchEmpty = match && keylen == 0
 		if match {
-			wn, err = sw.WriteString(s[last:i])
+			wn, err = sw.WriteText(s[last:i])
 			n += wn
 			if err != nil {
 				return
 			}
-			wn, err = sw.WriteString(val)
+			wn, err = sw.WriteText(val)
 			n += wn
 			if err != nil {
 				return
@@ -368,7 +380,7 @@ func (r *genericReplacer) WriteString(w io.Writer, s string) (n int, err error) 
 		i++
 	}
 	if last != len(s) {
-		wn, err = sw.WriteString(s[last:])
+		wn, err = sw.WriteText(s[last:])
 		n += wn
 	}
 	return
@@ -376,18 +388,18 @@ func (r *genericReplacer) WriteString(w io.Writer, s string) (n int, err error) 
 
 // singleStringReplacer is the implementation that's used when there is only
 // one string to replace (and that string has more than one byte).
-type singleStringReplacer struct {
-	finder *stringFinder
+type singleStringReplacer[S String] struct {
+	finder *stringFinder[S]
 	// value is the new string that replaces that pattern when it's found.
-	value string
+	value S
 }
 
-func makeSingleStringReplacer(pattern string, value string) *singleStringReplacer {
-	return &singleStringReplacer{finder: makeStringFinder(pattern), value: value}
+func makeSingleStringReplacer[S String](pattern, value S) *singleStringReplacer[S] {
+	return &singleStringReplacer[S]{finder: makeStringFinder(pattern), value: value}
 }
 
-func (r *singleStringReplacer) Replace(s string) string {
-	var buf Builder
+func (r *singleStringReplacer[S]) Replace(s S) S {
+	var buf Builder[S]
 	i, matched := 0, false
 	for {
 		match := r.finder.next(s[i:])
@@ -396,38 +408,38 @@ func (r *singleStringReplacer) Replace(s string) string {
 		}
 		matched = true
 		buf.Grow(match + len(r.value))
-		buf.WriteString(s[i : i+match])
-		buf.WriteString(r.value)
+		buf.WriteText(s[i : i+match])
+		buf.WriteText(r.value)
 		i += match + len(r.finder.pattern)
 	}
 	if !matched {
 		return s
 	}
-	buf.WriteString(s[i:])
-	return buf.String()
+	buf.WriteText(s[i:])
+	return buf.Text()
 }
 
-func (r *singleStringReplacer) WriteString(w io.Writer, s string) (n int, err error) {
-	sw := getStringWriter(w)
+func (r *singleStringReplacer[S]) WriteString(w io.Writer, s S) (n int, err error) {
+	sw := getTextWriter[S](w)
 	var i, wn int
 	for {
 		match := r.finder.next(s[i:])
 		if match == -1 {
 			break
 		}
-		wn, err = sw.WriteString(s[i : i+match])
+		wn, err = sw.WriteText(s[i : i+match])
 		n += wn
 		if err != nil {
 			return
 		}
-		wn, err = sw.WriteString(r.value)
+		wn, err = sw.WriteText(r.value)
 		n += wn
 		if err != nil {
 			return
 		}
 		i += match + len(r.finder.pattern)
 	}
-	wn, err = sw.WriteString(s[i:])
+	wn, err = sw.WriteText(s[i:])
 	n += wn
 	return
 }
@@ -435,49 +447,51 @@ func (r *singleStringReplacer) WriteString(w io.Writer, s string) (n int, err er
 // byteReplacer is the implementation that's used when all the "old"
 // and "new" values are single ASCII bytes.
 // The array contains replacement bytes indexed by old byte.
-type byteReplacer [256]byte
+type byteReplacer[S String] struct {
+	m [256]byte
+}
 
-func (r *byteReplacer) Replace(s string) string {
+func (r *byteReplacer[S]) Replace(s S) S {
 	var buf []byte // lazily allocated
 	for i := 0; i < len(s); i++ {
 		b := s[i]
-		if r[b] != b {
+		if r.m[b] != b {
 			if buf == nil {
 				buf = []byte(s)
 			}
-			buf[i] = r[b]
+			buf[i] = r.m[b]
 		}
 	}
 	if buf == nil {
 		return s
 	}
-	return string(buf)
+	return S(buf)
 }
 
-func (r *byteReplacer) WriteString(w io.Writer, s string) (n int, err error) {
-	sw := getStringWriter(w)
+func (r *byteReplacer[S]) WriteString(w io.Writer, s S) (n int, err error) {
+	sw := getTextWriter[S](w)
 	last := 0
 	for i := 0; i < len(s); i++ {
 		b := s[i]
-		if r[b] == b {
+		if r.m[b] == b {
 			continue
 		}
 		if last != i {
-			wn, err := sw.WriteString(s[last:i])
+			wn, err := sw.WriteText(s[last:i])
 			n += wn
 			if err != nil {
 				return n, err
 			}
 		}
 		last = i + 1
-		nw, err := w.Write(r[b : int(b)+1])
+		nw, err := w.Write(r.m[b : int(b)+1])
 		n += nw
 		if err != nil {
 			return n, err
 		}
 	}
 	if last != len(s) {
-		nw, err := sw.WriteString(s[last:])
+		nw, err := sw.WriteText(s[last:])
 		n += nw
 		if err != nil {
 			return n, err
@@ -488,18 +502,18 @@ func (r *byteReplacer) WriteString(w io.Writer, s string) (n int, err error) {
 
 // byteStringReplacer is the implementation that's used when all the
 // "old" values are single ASCII bytes but the "new" values vary in size.
-type byteStringReplacer struct {
+type byteStringReplacer[S String] struct {
 	// replacements contains replacement byte slices indexed by old byte.
 	// A nil []byte means that the old byte should not be replaced.
 	replacements [256][]byte
 	// toReplace keeps a list of bytes to replace. Depending on length of toReplace
 	// and length of target string it may be faster to use Count, or a plain loop.
 	// We store single byte as a string, because Count takes a string.
-	toReplace []string
+	toReplace []S
 }
 
 // countCutOff controls the ratio of a string length to a number of replacements
-// at which (*byteStringReplacer).Replace switches algorithms.
+// at which (*byteStringReplacer[S]).Replace switches algorithms.
 // For strings with higher ration of length to replacements than that value,
 // we call Count, for each replacement from toReplace.
 // For strings, with a lower ratio we use simple loop, because of Count overhead.
@@ -507,7 +521,7 @@ type byteStringReplacer struct {
 // TODO(tocarip) revisit once we have register-based abi/mid-stack inlining.
 const countCutOff = 8
 
-func (r *byteStringReplacer) Replace(s string) string {
+func (r *byteStringReplacer[S]) Replace(s S) S {
 	newSize := len(s)
 	anyChanges := false
 	// Is it faster to use Count?
@@ -544,11 +558,11 @@ func (r *byteStringReplacer) Replace(s string) string {
 			j++
 		}
 	}
-	return string(buf)
+	return S(buf)
 }
 
-func (r *byteStringReplacer) WriteString(w io.Writer, s string) (n int, err error) {
-	sw := getStringWriter(w)
+func (r *byteStringReplacer[S]) WriteString(w io.Writer, s S) (n int, err error) {
+	sw := getTextWriter[S](w)
 	last := 0
 	for i := 0; i < len(s); i++ {
 		b := s[i]
@@ -556,7 +570,7 @@ func (r *byteStringReplacer) WriteString(w io.Writer, s string) (n int, err erro
 			continue
 		}
 		if last != i {
-			nw, err := sw.WriteString(s[last:i])
+			nw, err := sw.WriteText(s[last:i])
 			n += nw
 			if err != nil {
 				return n, err
@@ -571,7 +585,7 @@ func (r *byteStringReplacer) WriteString(w io.Writer, s string) (n int, err erro
 	}
 	if last != len(s) {
 		var nw int
-		nw, err = sw.WriteString(s[last:])
+		nw, err = sw.WriteText(s[last:])
 		n += nw
 	}
 	return

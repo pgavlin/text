@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings_test
+package text_test
 
 import (
 	"bytes"
-	. "strings"
 	"testing"
 	"unicode/utf8"
+
+	. "github.com/pgavlin/text"
 )
 
-func check(t *testing.T, b *Builder, want string) {
+func check(t *testing.T, b *Builder[string], want string) {
 	t.Helper()
 	got := b.String()
 	if got != want {
@@ -27,7 +28,7 @@ func check(t *testing.T, b *Builder, want string) {
 }
 
 func TestBuilder(t *testing.T) {
-	var b Builder
+	var b Builder[string]
 	check(t, &b, "")
 	n, err := b.WriteString("hello")
 	if err != nil || n != 5 {
@@ -46,7 +47,7 @@ func TestBuilder(t *testing.T) {
 }
 
 func TestBuilderString(t *testing.T) {
-	var b Builder
+	var b Builder[string]
 	b.WriteString("alpha")
 	check(t, &b, "alpha")
 	s1 := b.String()
@@ -70,7 +71,7 @@ func TestBuilderString(t *testing.T) {
 }
 
 func TestBuilderReset(t *testing.T) {
-	var b Builder
+	var b Builder[string]
 	check(t, &b, "")
 	b.WriteString("aaa")
 	s := b.String()
@@ -91,7 +92,7 @@ func TestBuilderGrow(t *testing.T) {
 	for _, growLen := range []int{0, 100, 1000, 10000, 100000} {
 		p := bytes.Repeat([]byte{'a'}, growLen)
 		allocs := testing.AllocsPerRun(100, func() {
-			var b Builder
+			var b Builder[string]
 			b.Grow(growLen) // should be only alloc, when growLen > 0
 			if b.Cap() < growLen {
 				t.Fatalf("growLen=%d: Cap() is lower than growLen", growLen)
@@ -110,7 +111,7 @@ func TestBuilderGrow(t *testing.T) {
 		}
 	}
 	// when growLen < 0, should panic
-	var a Builder
+	var a Builder[string]
 	n := -1
 	defer func() {
 		if r := recover(); r == nil {
@@ -124,37 +125,37 @@ func TestBuilderWrite2(t *testing.T) {
 	const s0 = "hello 世界"
 	for _, tt := range []struct {
 		name string
-		fn   func(b *Builder) (int, error)
+		fn   func(b *Builder[string]) (int, error)
 		n    int
 		want string
 	}{
 		{
 			"Write",
-			func(b *Builder) (int, error) { return b.Write([]byte(s0)) },
+			func(b *Builder[string]) (int, error) { return b.Write([]byte(s0)) },
 			len(s0),
 			s0,
 		},
 		{
 			"WriteRune",
-			func(b *Builder) (int, error) { return b.WriteRune('a') },
+			func(b *Builder[string]) (int, error) { return b.WriteRune('a') },
 			1,
 			"a",
 		},
 		{
 			"WriteRuneWide",
-			func(b *Builder) (int, error) { return b.WriteRune('世') },
+			func(b *Builder[string]) (int, error) { return b.WriteRune('世') },
 			3,
 			"世",
 		},
 		{
 			"WriteString",
-			func(b *Builder) (int, error) { return b.WriteString(s0) },
+			func(b *Builder[string]) (int, error) { return b.WriteString(s0) },
 			len(s0),
 			s0,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var b Builder
+			var b Builder[string]
 			n, err := tt.fn(&b)
 			if err != nil {
 				t.Fatalf("first call: got %s", err)
@@ -177,7 +178,7 @@ func TestBuilderWrite2(t *testing.T) {
 }
 
 func TestBuilderWriteByte(t *testing.T) {
-	var b Builder
+	var b Builder[string]
 	if err := b.WriteByte('a'); err != nil {
 		t.Error(err)
 	}
@@ -191,7 +192,7 @@ func TestBuilderAllocs(t *testing.T) {
 	// Issue 23382; verify that copyCheck doesn't force the
 	// Builder to escape and be heap allocated.
 	n := testing.AllocsPerRun(10000, func() {
-		var b Builder
+		var b Builder[string]
 		b.Grow(5)
 		b.WriteString("abcde")
 		_ = b.String()
@@ -211,7 +212,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "String",
 			wantPanic: false,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.WriteByte('x')
 				b := a
 				_ = b.String() // appease vet
@@ -221,7 +222,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "Len",
 			wantPanic: false,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.WriteByte('x')
 				b := a
 				b.Len()
@@ -231,7 +232,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "Cap",
 			wantPanic: false,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.WriteByte('x')
 				b := a
 				b.Cap()
@@ -241,7 +242,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "Reset",
 			wantPanic: false,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.WriteByte('x')
 				b := a
 				b.Reset()
@@ -252,7 +253,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "Write",
 			wantPanic: true,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.Write([]byte("x"))
 				b := a
 				b.Write([]byte("y"))
@@ -262,7 +263,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "WriteByte",
 			wantPanic: true,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.WriteByte('x')
 				b := a
 				b.WriteByte('y')
@@ -272,7 +273,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "WriteString",
 			wantPanic: true,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.WriteString("x")
 				b := a
 				b.WriteString("y")
@@ -282,7 +283,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "WriteRune",
 			wantPanic: true,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.WriteRune('x')
 				b := a
 				b.WriteRune('y')
@@ -292,7 +293,7 @@ func TestBuilderCopyPanic(t *testing.T) {
 			name:      "Grow",
 			wantPanic: true,
 			fn: func() {
-				var a Builder
+				var a Builder[string]
 				a.Grow(1)
 				b := a
 				b.Grow(2)
@@ -315,7 +316,7 @@ func TestBuilderWriteInvalidRune(t *testing.T) {
 	// Invalid runes, including negative ones, should be written as
 	// utf8.RuneError.
 	for _, r := range []rune{-1, utf8.MaxRune + 1} {
-		var b Builder
+		var b Builder[string]
 		b.WriteRune(r)
 		check(t, &b, "\uFFFD")
 	}
@@ -343,7 +344,7 @@ func benchmarkBuilder(b *testing.B, f func(b *testing.B, numWrite int, grow bool
 func BenchmarkBuildString_Builder(b *testing.B) {
 	benchmarkBuilder(b, func(b *testing.B, numWrite int, grow bool) {
 		for i := 0; i < b.N; i++ {
-			var buf Builder
+			var buf Builder[string]
 			if grow {
 				buf.Grow(len(someBytes) * numWrite)
 			}

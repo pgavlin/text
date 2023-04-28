@@ -2,18 +2,21 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings
+package text
 
 import (
-	"unicode/utf8"
+	"reflect"
 	"unsafe"
+
+	"github.com/pgavlin/text/internal/bytealg"
+	"github.com/pgavlin/text/utf8"
 )
 
 // A Builder is used to efficiently build a string using Write methods.
 // It minimizes memory copying. The zero value is ready to use.
 // Do not copy a non-zero Builder.
-type Builder struct {
-	addr *Builder // of receiver, to detect copies by value
+type Builder[S String] struct {
+	addr *Builder[S] // of receiver, to detect copies by value
 	buf  []byte
 }
 
@@ -30,41 +33,50 @@ func noescape(p unsafe.Pointer) unsafe.Pointer {
 	return unsafe.Pointer(x ^ 0)
 }
 
-func (b *Builder) copyCheck() {
+func (b *Builder[S]) copyCheck() {
 	if b.addr == nil {
 		// This hack works around a failing of Go's escape analysis
 		// that was causing b to escape and be heap allocated.
 		// See issue 23382.
 		// TODO: once issue 7921 is fixed, this should be reverted to
 		// just "b.addr = b".
-		b.addr = (*Builder)(noescape(unsafe.Pointer(b)))
+		b.addr = (*Builder[S])(noescape(unsafe.Pointer(b)))
 	} else if b.addr != b {
 		panic("strings: illegal use of non-zero Builder copied by value")
 	}
 }
 
+// Text returns the accumulated text.
+func (b *Builder[S]) Text() S {
+	var s S
+	if reflect.TypeOf(s).Kind() == reflect.String {
+		return S(b.String())
+	}
+	return S(b.buf)
+}
+
 // String returns the accumulated string.
-func (b *Builder) String() string {
+func (b *Builder[S]) String() string {
 	return unsafe.String(unsafe.SliceData(b.buf), len(b.buf))
 }
 
 // Len returns the number of accumulated bytes; b.Len() == len(b.String()).
-func (b *Builder) Len() int { return len(b.buf) }
+func (b *Builder[S]) Len() int { return len(b.buf) }
 
 // Cap returns the capacity of the builder's underlying byte slice. It is the
 // total space allocated for the string being built and includes any bytes
 // already written.
-func (b *Builder) Cap() int { return cap(b.buf) }
+func (b *Builder[S]) Cap() int { return cap(b.buf) }
 
 // Reset resets the Builder to be empty.
-func (b *Builder) Reset() {
+func (b *Builder[S]) Reset() {
 	b.addr = nil
 	b.buf = nil
 }
 
 // grow copies the buffer to a new, larger buffer so that there are at least n
 // bytes of capacity beyond len(b.buf).
-func (b *Builder) grow(n int) {
+func (b *Builder[S]) grow(n int) {
 	buf := make([]byte, len(b.buf), 2*cap(b.buf)+n)
 	copy(buf, b.buf)
 	b.buf = buf
@@ -73,7 +85,7 @@ func (b *Builder) grow(n int) {
 // Grow grows b's capacity, if necessary, to guarantee space for
 // another n bytes. After Grow(n), at least n bytes can be written to b
 // without another allocation. If n is negative, Grow panics.
-func (b *Builder) Grow(n int) {
+func (b *Builder[S]) Grow(n int) {
 	b.copyCheck()
 	if n < 0 {
 		panic("strings.Builder.Grow: negative count")
@@ -85,7 +97,7 @@ func (b *Builder) Grow(n int) {
 
 // Write appends the contents of p to b's buffer.
 // Write always returns len(p), nil.
-func (b *Builder) Write(p []byte) (int, error) {
+func (b *Builder[S]) Write(p []byte) (int, error) {
 	b.copyCheck()
 	b.buf = append(b.buf, p...)
 	return len(p), nil
@@ -93,7 +105,7 @@ func (b *Builder) Write(p []byte) (int, error) {
 
 // WriteByte appends the byte c to b's buffer.
 // The returned error is always nil.
-func (b *Builder) WriteByte(c byte) error {
+func (b *Builder[S]) WriteByte(c byte) error {
 	b.copyCheck()
 	b.buf = append(b.buf, c)
 	return nil
@@ -101,7 +113,7 @@ func (b *Builder) WriteByte(c byte) error {
 
 // WriteRune appends the UTF-8 encoding of Unicode code point r to b's buffer.
 // It returns the length of r and a nil error.
-func (b *Builder) WriteRune(r rune) (int, error) {
+func (b *Builder[S]) WriteRune(r rune) (int, error) {
 	b.copyCheck()
 	n := len(b.buf)
 	b.buf = utf8.AppendRune(b.buf, r)
@@ -110,8 +122,22 @@ func (b *Builder) WriteRune(r rune) (int, error) {
 
 // WriteString appends the contents of s to b's buffer.
 // It returns the length of s and a nil error.
-func (b *Builder) WriteString(s string) (int, error) {
+func (b *Builder[S]) WriteString(s string) (int, error) {
 	b.copyCheck()
 	b.buf = append(b.buf, s...)
 	return len(s), nil
+}
+
+// WriteText appends the contents of s to b's buffer.
+// It returns the length of s and a nil error.
+func (b *Builder[S]) WriteText(s S) (int, error) {
+	b.copyCheck()
+	b.buf = append(b.buf, s...)
+	return len(s), nil
+}
+
+// WriteString appends the contents of s to b's buffer.
+// It returns the length of s and a nil error.
+func WriteString[S1, S2 String, B *Builder[S1]](b B, s S2) (int, error) {
+	return (*Builder[S1])(b).WriteString(bytealg.AsString(s))
 }

@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings_test
+package text_test
 
 import (
 	"reflect"
-	. "strings"
 	"testing"
+
+	. "github.com/pgavlin/text"
 )
 
 func TestFinderNext(t *testing.T) {

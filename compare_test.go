@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings_test
+package text_test
 
 // Derived from bytes/compare_test.go.
 // Benchmarks omitted since the underlying implementation is identical.
 
 import (
-	"internal/testenv"
-	. "strings"
 	"testing"
 	"unsafe"
+
+	. "github.com/pgavlin/text"
 )
 
 var compareTests = []struct {
@@ -66,7 +66,7 @@ func TestCompareStrings(t *testing.T) {
 	}
 	lengths = append(lengths, 256, 512, 1024, 1333, 4095, 4096, 4097)
 
-	if !testing.Short() || testenv.Builder() != "" {
+	if !testing.Short() {
 		lengths = append(lengths, 65535, 65536, 65537, 99999)
 	}
 

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings_test
+package text_test
 
 import (
 	"bytes"
@@ -12,11 +12,12 @@ import (
 	"math/rand"
 	"reflect"
 	"strconv"
-	. "strings"
 	"testing"
 	"unicode"
 	"unicode/utf8"
 	"unsafe"
+
+	. "github.com/pgavlin/text"
 )
 
 func eq(a, b []string) bool {
@@ -204,11 +205,15 @@ func runIndexTests(t *testing.T, f func(s, sep string) int, funcName string, tes
 	}
 }
 
-func TestIndex(t *testing.T)     { runIndexTests(t, Index, "Index", indexTests) }
-func TestLastIndex(t *testing.T) { runIndexTests(t, LastIndex, "LastIndex", lastIndexTests) }
-func TestIndexAny(t *testing.T)  { runIndexTests(t, IndexAny, "IndexAny", indexAnyTests) }
+func TestIndex(t *testing.T) { runIndexTests(t, Index[string, string], "Index", indexTests) }
+func TestLastIndex(t *testing.T) {
+	runIndexTests(t, LastIndex[string, string], "LastIndex", lastIndexTests)
+}
+func TestIndexAny(t *testing.T) {
+	runIndexTests(t, IndexAny[string, string], "IndexAny", indexAnyTests)
+}
 func TestLastIndexAny(t *testing.T) {
-	runIndexTests(t, LastIndexAny, "LastIndexAny", lastIndexAnyTests)
+	runIndexTests(t, LastIndexAny[string, string], "LastIndexAny", lastIndexAnyTests)
 }
 
 func TestIndexByte(t *testing.T) {
@@ -318,12 +323,18 @@ func TestIndexRune(t *testing.T) {
 		if i := IndexRune(haystack, 's'); i != 2 {
 			t.Fatalf("'s' at %d; want 2", i)
 		}
+	})
+	if allocs != 0 && testing.CoverMode() == "" {
+		t.Errorf("expected no allocations, got %f", allocs)
+	}
+
+	allocs = testing.AllocsPerRun(1000, func() {
 		if i := IndexRune(haystack, '世'); i != 4 {
 			t.Fatalf("'世' at %d; want 4", i)
 		}
 	})
-	if allocs != 0 && testing.CoverMode() == "" {
-		t.Errorf("expected no allocations, got %f", allocs)
+	if allocs != 1 && testing.CoverMode() == "" {
+		t.Errorf("expected one allocation, got %f", allocs)
 	}
 }
 
@@ -717,9 +728,9 @@ func TestMap(t *testing.T) {
 	}
 }
 
-func TestToUpper(t *testing.T) { runStringTests(t, ToUpper, "ToUpper", upperTests) }
+func TestToUpper(t *testing.T) { runStringTests(t, ToUpper[string], "ToUpper", upperTests) }
 
-func TestToLower(t *testing.T) { runStringTests(t, ToLower, "ToLower", lowerTests) }
+func TestToLower(t *testing.T) { runStringTests(t, ToLower[string], "ToLower", lowerTests) }
 
 var toValidUTF8Tests = []struct {
 	in   string
@@ -807,7 +818,7 @@ func TestSpecialCase(t *testing.T) {
 	}
 }
 
-func TestTrimSpace(t *testing.T) { runStringTests(t, TrimSpace, "TrimSpace", trimSpaceTests) }
+func TestTrimSpace(t *testing.T) { runStringTests(t, TrimSpace[string], "TrimSpace", trimSpaceTests) }
 
 var trimTests = []struct {
 	f            string
@@ -851,15 +862,15 @@ func TestTrim(t *testing.T) {
 		var f func(string, string) string
 		switch name {
 		case "Trim":
-			f = Trim
+			f = Trim[string, string]
 		case "TrimLeft":
-			f = TrimLeft
+			f = TrimLeft[string, string]
 		case "TrimRight":
-			f = TrimRight
+			f = TrimRight[string, string]
 		case "TrimPrefix":
-			f = TrimPrefix
+			f = TrimPrefix[string, string]
 		case "TrimSuffix":
-			f = TrimSuffix
+			f = TrimSuffix[string, string]
 		default:
 			t.Errorf("Undefined trim function %s", name)
 		}
@@ -879,15 +890,15 @@ func BenchmarkTrim(b *testing.B) {
 			var f func(string, string) string
 			switch name {
 			case "Trim":
-				f = Trim
+				f = Trim[string, string]
 			case "TrimLeft":
-				f = TrimLeft
+				f = TrimLeft[string, string]
 			case "TrimRight":
-				f = TrimRight
+				f = TrimRight[string, string]
 			case "TrimPrefix":
-				f = TrimPrefix
+				f = TrimPrefix[string, string]
 			case "TrimSuffix":
-				f = TrimSuffix
+				f = TrimSuffix[string, string]
 			default:
 				b.Errorf("Undefined trim function %s", name)
 			}
@@ -995,9 +1006,9 @@ func TestTrimFunc(t *testing.T) {
 			trim func(s string, f func(r rune) bool) string
 			out  string
 		}{
-			{"TrimFunc", TrimFunc, tc.trimOut},
-			{"TrimLeftFunc", TrimLeftFunc, tc.leftOut},
-			{"TrimRightFunc", TrimRightFunc, tc.rightOut},
+			{"TrimFunc", TrimFunc[string], tc.trimOut},
+			{"TrimLeftFunc", TrimLeftFunc[string], tc.leftOut},
+			{"TrimRightFunc", TrimRightFunc[string], tc.rightOut},
 		}
 		for _, trimmer := range trimmers {
 			actual := trimmer.trim(tc.in, tc.f.f)
@@ -1315,13 +1326,13 @@ func TestReadRune(t *testing.T) {
 
 var UnreadRuneErrorTests = []struct {
 	name string
-	f    func(*Reader)
+	f    func(*Reader[string])
 }{
-	{"Read", func(r *Reader) { r.Read([]byte{0}) }},
-	{"ReadByte", func(r *Reader) { r.ReadByte() }},
-	{"UnreadRune", func(r *Reader) { r.UnreadRune() }},
-	{"Seek", func(r *Reader) { r.Seek(0, io.SeekCurrent) }},
-	{"WriteTo", func(r *Reader) { r.WriteTo(&bytes.Buffer{}) }},
+	{"Read", func(r *Reader[string]) { r.Read([]byte{0}) }},
+	{"ReadByte", func(r *Reader[string]) { r.ReadByte() }},
+	{"UnreadRune", func(r *Reader[string]) { r.UnreadRune() }},
+	{"Seek", func(r *Reader[string]) { r.Seek(0, io.SeekCurrent) }},
+	{"WriteTo", func(r *Reader[string]) { r.WriteTo(&bytes.Buffer{}) }},
 }
 
 func TestUnreadRuneError(t *testing.T) {
@@ -1535,6 +1546,17 @@ func TestContainsRune(t *testing.T) {
 	}
 }
 
+func TestContainsFunc(t *testing.T) {
+	for _, ct := range ContainsRuneTests {
+		if ContainsFunc(ct.str, func(r rune) bool {
+			return ct.r == r
+		}) != ct.expected {
+			t.Errorf("ContainsFunc(%q, func(%q)) = %v, want %v",
+				ct.str, ct.r, !ct.expected, ct.expected)
+		}
+	}
+}
+
 var EqualFoldTests = []struct {
 	s, t string
 	out  bool
@@ -1668,7 +1690,7 @@ func TestCutPrefix(t *testing.T) {
 
 var cutSuffixTests = []struct {
 	s, sep string
-	after  string
+	before string
 	found  bool
 }{
 	{"abc", "bc", "a", true},
@@ -1681,8 +1703,8 @@ var cutSuffixTests = []struct {
 
 func TestCutSuffix(t *testing.T) {
 	for _, tt := range cutSuffixTests {
-		if after, found := CutSuffix(tt.s, tt.sep); after != tt.after || found != tt.found {
-			t.Errorf("CutSuffix(%q, %q) = %q, %v, want %q, %v", tt.s, tt.sep, after, found, tt.after, tt.found)
+		if before, found := CutSuffix(tt.s, tt.sep); before != tt.before || found != tt.found {
+			t.Errorf("CutSuffix(%q, %q) = %q, %v, want %q, %v", tt.s, tt.sep, before, found, tt.before, tt.found)
 		}
 	}
 }

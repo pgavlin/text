@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings
+package text
 
 import (
 	"unsafe"
@@ -18,11 +18,16 @@ import (
 // profiling indicates that it is needed.
 // For strings of length zero the string "" will be returned
 // and no allocation is made.
-func Clone(s string) string {
-	if len(s) == 0 {
-		return ""
+func Clone[S String](s S) S {
+	if IsEmpty(s) {
+		return Empty[S]()
 	}
+
 	b := make([]byte, len(s))
 	copy(b, s)
-	return unsafe.String(&b[0], len(b))
+
+	if isString[S]() {
+		return S(unsafe.String(&b[0], len(b)))
+	}
+	return S(b)
 }

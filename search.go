@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings
+package text
 
 // stringFinder efficiently finds strings in a source text. It's implemented
 // using the Boyer-Moore string search algorithm:
 // https://en.wikipedia.org/wiki/Boyer-Moore_string_search_algorithm
 // https://www.cs.utexas.edu/~moore/publications/fstrpos.pdf (note: this aged
 // document uses 1-based indexing)
-type stringFinder struct {
+type stringFinder[S String] struct {
 	// pattern is the string that we are searching for in the text.
-	pattern string
+	pattern S
 
 	// badCharSkip[b] contains the distance between the last byte of pattern
 	// and the rightmost occurrence of b in pattern. If b is not in pattern,
@@ -45,8 +45,8 @@ type stringFinder struct {
 	goodSuffixSkip []int
 }
 
-func makeStringFinder(pattern string) *stringFinder {
-	f := &stringFinder{
+func makeStringFinder[S String](pattern S) *stringFinder[S] {
+	f := &stringFinder[S]{
 		pattern:        pattern,
 		goodSuffixSkip: make([]int, len(pattern)),
 	}
@@ -88,7 +88,7 @@ func makeStringFinder(pattern string) *stringFinder {
 	return f
 }
 
-func longestCommonSuffix(a, b string) (i int) {
+func longestCommonSuffix[S1, S2 String](a S1, b S2) (i int) {
 	for ; i < len(a) && i < len(b); i++ {
 		if a[len(a)-1-i] != b[len(b)-1-i] {
 			break
@@ -99,7 +99,7 @@ func longestCommonSuffix(a, b string) (i int) {
 
 // next returns the index in text of the first occurrence of the pattern. If
 // the pattern is not found, it returns -1.
-func (f *stringFinder) next(text string) int {
+func (f *stringFinder[S]) next(text S) int {
 	i := len(f.pattern) - 1
 	for i < len(text) {
 		// Compare backwards from the end until the first unmatching character.

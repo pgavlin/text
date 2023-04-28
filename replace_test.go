@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package strings_test
+package text_test
 
 import (
 	"bytes"
 	"fmt"
-	. "strings"
 	"testing"
+
+	. "github.com/pgavlin/text"
 )
 
 var htmlEscaper = NewReplacer(
@@ -42,7 +43,7 @@ var capitalLetters = NewReplacer("a", "A", "b", "B")
 // TestReplacer tests the replacer implementations.
 func TestReplacer(t *testing.T) {
 	type testCase struct {
-		r       *Replacer
+		r       *Replacer[string]
 		in, out string
 	}
 	var testCases []testCase
@@ -278,7 +279,7 @@ func TestReplacer(t *testing.T) {
 
 	// No-arg test cases.
 
-	nop := NewReplacer()
+	nop := NewReplacer[string]()
 	testCases = append(testCases,
 		testCase{nop, "abc", "abc"},
 		testCase{nop, "", ""},
@@ -309,15 +310,15 @@ func TestReplacer(t *testing.T) {
 }
 
 var algorithmTestCases = []struct {
-	r    *Replacer
+	r    *Replacer[string]
 	want string
 }{
-	{capitalLetters, "*strings.byteReplacer"},
-	{htmlEscaper, "*strings.byteStringReplacer"},
-	{NewReplacer("12", "123"), "*strings.singleStringReplacer"},
-	{NewReplacer("1", "12"), "*strings.byteStringReplacer"},
-	{NewReplacer("", "X"), "*strings.genericReplacer"},
-	{NewReplacer("a", "1", "b", "12", "cde", "123"), "*strings.genericReplacer"},
+	{capitalLetters, "*text.byteReplacer[string]"},
+	{htmlEscaper, "*text.byteStringReplacer[string]"},
+	{NewReplacer("12", "123"), "*text.singleStringReplacer[string]"},
+	{NewReplacer("1", "12"), "*text.byteStringReplacer[string]"},
+	{NewReplacer("", "X"), "*text.genericReplacer[string]"},
+	{NewReplacer("a", "1", "b", "12", "cde", "123"), "*text.genericReplacer[string]"},
 }
 
 // TestPickAlgorithm tests that NewReplacer picks the correct algorithm.
