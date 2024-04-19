@@ -32,11 +32,38 @@ func CountString[S ~string | ~[]byte](s S, c byte) int {
 	return countString(AsString(s), c)
 }
 
-//go:linkname hashStrRev internal/bytealg.HashStrRev
-func hashStrRev(sep string) (uint32, uint32)
+// HashStr returns the hash and the appropriate multiplicative
+// factor for use in Rabin-Karp algorithm.
+func HashStr[S ~string | ~[]byte](sep S) (uint32, uint32) {
+	hash := uint32(0)
+	for i := 0; i < len(sep); i++ {
+		hash = hash*PrimeRK + uint32(sep[i])
+	}
+	var pow, sq uint32 = 1, PrimeRK
+	for i := len(sep); i > 0; i >>= 1 {
+		if i&1 != 0 {
+			pow *= sq
+		}
+		sq *= sq
+	}
+	return hash, pow
+}
 
+// HashStrRev returns the hash of the reverse of sep and the
+// appropriate multiplicative factor for use in Rabin-Karp algorithm.
 func HashStrRev[S ~string | ~[]byte](sep S) (uint32, uint32) {
-	return hashStrRev(AsString(sep))
+	hash := uint32(0)
+	for i := len(sep) - 1; i >= 0; i-- {
+		hash = hash*PrimeRK + uint32(sep[i])
+	}
+	var pow, sq uint32 = 1, PrimeRK
+	for i := len(sep); i > 0; i >>= 1 {
+		if i&1 != 0 {
+			pow *= sq
+		}
+		sq *= sq
+	}
+	return hash, pow
 }
 
 //go:linkname Cutover internal/bytealg.Cutover
@@ -50,13 +77,29 @@ func IndexByteString[S ~string | ~[]byte](s S, c byte) int {
 	return indexByteString(AsString(s), c)
 }
 
-//go:linkname indexRabinKarp internal/bytealg.IndexRabinKarp
-func indexRabinKarp(s, substr string) int
-
 // IndexRabinKarp uses the Rabin-Karp search algorithm to return the index of the
-// first occurrence of substr in s, or -1 if not present.
-func IndexRabinKarp[S1, S2 ~string | ~[]byte](s S1, substr S2) int {
-	return indexRabinKarp(AsString(s), AsString(substr))
+// first occurrence of sep in s, or -1 if not present.
+func IndexRabinKarp[S1 ~string | ~[]byte, S2 ~string | ~[]byte](s S1, sep S2) int {
+	// Rabin-Karp search
+	hashss, pow := HashStr(sep)
+	n := len(sep)
+	var h uint32
+	for i := 0; i < n; i++ {
+		h = h*PrimeRK + uint32(s[i])
+	}
+	if h == hashss && string(s[:n]) == string(sep) {
+		return 0
+	}
+	for i := n; i < len(s); {
+		h *= PrimeRK
+		h += uint32(s[i])
+		h -= pow * uint32(s[i-n])
+		i++
+		if h == hashss && string(s[i-n:i]) == string(sep) {
+			return i - n
+		}
+	}
+	return -1
 }
 
 //go:linkname indexString internal/bytealg.IndexString
