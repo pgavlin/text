@@ -4,7 +4,11 @@
 
 package text
 
-import "github.com/pgavlin/text/internal/bytealg"
+import (
+	"strings"
+
+	"github.com/pgavlin/text/internal/bytealg"
+)
 
 // Compare returns an integer comparing two strings lexicographically.
 // The result will be 0 if a == b, -1 if a < b, and +1 if a > b.
@@ -13,7 +17,7 @@ import "github.com/pgavlin/text/internal/bytealg"
 // It is usually clearer and always faster to use the built-in
 // string comparison operators ==, <, >, and so on.
 func Compare[S1, S2 String](a S1, b S2) int {
-	return bytealg.Compare(a, b)
+	return strings.Compare(bytealg.AsString(a), bytealg.AsString(b))
 }
 
 // Equal compares two strings for equality.

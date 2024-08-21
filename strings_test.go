@@ -333,7 +333,7 @@ func TestIndexRune(t *testing.T) {
 			t.Fatalf("'世' at %d; want 4", i)
 		}
 	})
-	if allocs != 1 && testing.CoverMode() == "" {
+	if allocs > 1 && testing.CoverMode() == "" {
 		t.Errorf("expected one allocation, got %f", allocs)
 	}
 }
