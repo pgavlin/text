@@ -5,6 +5,7 @@
 package bufio_test
 
 import (
+	stdbufio "bufio"
 	"io"
 	"strings"
 	"testing"
@@ -226,4 +227,151 @@ func TestReaderReadSlice(t *testing.T) {
 	if s != "hello\n" {
 		t.Fatalf("got %q, want %q", s, "hello\n")
 	}
+}
+
+// -- Benchmarks --
+
+// benchInput is a large multi-line string used across all benchmarks.
+var benchInput string
+
+func init() {
+	var sb strings.Builder
+	for range 1000 {
+		sb.WriteString("hello world foo bar baz qux\n")
+	}
+	benchInput = sb.String()
+}
+
+// sinkString and sinkBytes are package-level sinks used by benchmarks to
+// prevent escape analysis from eliminating string/[]byte allocations.
+var sinkString string
+var sinkBytes []byte
+
+// BenchmarkScannerToken compares generic Token() against stdlib Text().
+// Token() for string returns the buffer-backed string with no allocation;
+// stdlib Text() copies to a new string allocation each call.
+func BenchmarkScannerToken(b *testing.B) {
+	b.Run("string", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			sc := bufio.NewScanner[string](strings.NewReader(benchInput))
+			for sc.Scan() {
+				sinkString = sc.Token()
+			}
+		}
+	})
+	b.Run("bytes", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			sc := bufio.NewScanner[[]byte](strings.NewReader(benchInput))
+			for sc.Scan() {
+				sinkBytes = sc.Token()
+			}
+		}
+	})
+	b.Run("stdlib_Text", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			sc := stdbufio.NewScanner(strings.NewReader(benchInput))
+			for sc.Scan() {
+				sinkString = sc.Text()
+			}
+		}
+	})
+}
+
+// BenchmarkReaderReadLine compares generic ReadLine() (zero-copy string) against
+// stdlib ReadLine() followed by an explicit string() conversion.
+func BenchmarkReaderReadLine(b *testing.B) {
+	b.Run("string", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			r := bufio.NewReader[string](strings.NewReader(benchInput))
+			for {
+				line, _, err := r.ReadLine()
+				sinkString = line
+				if err == io.EOF {
+					break
+				}
+			}
+		}
+	})
+	b.Run("stdlib", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			r := stdbufio.NewReader(strings.NewReader(benchInput))
+			for {
+				line, _, err := r.ReadLine()
+				sinkString = string(line)
+				if err == io.EOF {
+					break
+				}
+			}
+		}
+	})
+}
+
+// BenchmarkReaderReadText compares generic ReadText() against stdlib ReadString().
+// Both allocate (the result does not alias the buffer), so this measures parity.
+func BenchmarkReaderReadText(b *testing.B) {
+	b.Run("string", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			r := bufio.NewReader[string](strings.NewReader(benchInput))
+			for {
+				s, err := r.ReadText('\n')
+				sinkString = s
+				if err == io.EOF {
+					break
+				}
+			}
+		}
+	})
+	b.Run("bytes", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			r := bufio.NewReader[[]byte](strings.NewReader(benchInput))
+			for {
+				s, err := r.ReadText('\n')
+				sinkBytes = s
+				if err == io.EOF {
+					break
+				}
+			}
+		}
+	})
+	b.Run("stdlib_ReadString", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			r := stdbufio.NewReader(strings.NewReader(benchInput))
+			for {
+				s, err := r.ReadString('\n')
+				sinkString = s
+				if err == io.EOF {
+					break
+				}
+			}
+		}
+	})
+}
+
+// BenchmarkReaderPeek compares generic Peek() (zero-copy string) against
+// stdlib Peek() followed by an explicit string() conversion.
+func BenchmarkReaderPeek(b *testing.B) {
+	b.Run("string", func(b *testing.B) {
+		b.ReportAllocs()
+		r := bufio.NewReader[string](strings.NewReader(benchInput))
+		for range b.N {
+			s, _ := r.Peek(5)
+			sinkString = s
+		}
+	})
+	b.Run("stdlib", func(b *testing.B) {
+		b.ReportAllocs()
+		r := stdbufio.NewReader(strings.NewReader(benchInput))
+		for range b.N {
+			b2, _ := r.Peek(5)
+			sinkString = string(b2)
+		}
+	})
 }
