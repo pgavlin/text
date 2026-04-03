@@ -1,3 +1,3 @@
 module github.com/pgavlin/text
 
-go 1.20
+go 1.23

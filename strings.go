@@ -8,6 +8,7 @@
 package text
 
 import (
+	"math/bits"
 	"reflect"
 	"strings"
 	"unicode"
@@ -123,7 +124,42 @@ func IndexRune[S String](s S, r rune) int {
 	case !utf8.ValidRune(r):
 		return -1
 	default:
-		return Index(s, string(r))
+		// Search for rune r using the last byte of its UTF-8 encoded form.
+		// The distribution of the last byte is more uniform compared to the
+		// first byte which has a 78% chance of being [240, 243, 244].
+		rs := string(r)
+		last := len(rs) - 1
+		i := last
+		fails := 0
+		for i < len(s) {
+			if s[i] != rs[last] {
+				o := IndexByte(s[i+1:], rs[last])
+				if o < 0 {
+					return -1
+				}
+				i += o + 1
+			}
+			// Step backwards comparing bytes.
+			for j := 1; j < len(rs); j++ {
+				if s[i-j] != rs[last-j] {
+					goto next
+				}
+			}
+			return i - last
+		next:
+			fails++
+			i++
+			if fails >= 4+i>>4 && i < len(s) {
+				goto fallback
+			}
+		}
+		return -1
+
+	fallback:
+		if j := Index(s[i-last:], rs); j >= 0 {
+			return i + j - last
+		}
+		return -1
 	}
 }
 
@@ -214,12 +250,7 @@ func LastIndexAny[S1, S2 String](s S1, chars S2) int {
 
 // LastIndexByte returns the index of the last instance of c in s, or -1 if c is not present in s.
 func LastIndexByte[S String](s S, c byte) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
+	return strings.LastIndexByte(bytealg.AsString(s), c)
 }
 
 // Generic split: splits after each instance of sep,
@@ -530,6 +561,27 @@ func Map[S String](mapping func(rune) rune, s S) S {
 	return b.Text()
 }
 
+// According to static analysis, spaces, dashes, zeros, equals, and tabs
+// are the most commonly repeated string literal,
+// often used for display on fixed-width terminal windows.
+// Pre-declare constants for these for O(1) repetition in the common-case.
+const (
+	repeatedSpaces = "" +
+		"                                                                " +
+		"                                                                "
+	repeatedDashes = "" +
+		"----------------------------------------------------------------" +
+		"----------------------------------------------------------------"
+	repeatedZeroes = "" +
+		"0000000000000000000000000000000000000000000000000000000000000000"
+	repeatedEquals = "" +
+		"================================================================" +
+		"================================================================"
+	repeatedTabs = "" +
+		"\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t" +
+		"\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t"
+)
+
 // Repeat returns a new string consisting of count copies of the string s.
 //
 // It panics if count is negative or if the result of (len(s) * count)
@@ -548,13 +600,31 @@ func Repeat[S String](s S, count int) S {
 	if count < 0 {
 		panic("strings: negative Repeat count")
 	}
-	if len(s) >= maxInt/count {
+	hi, lo := bits.Mul(uint(len(s)), uint(count))
+	if hi > 0 || lo > uint(maxInt) {
 		panic("strings: Repeat output length overflow")
 	}
-	n := len(s) * count
+	n := int(lo) // lo = len(s) * count
 
 	if IsEmpty(s) {
 		return Empty[S]()
+	}
+
+	// Optimize for commonly repeated strings of relatively short length.
+	switch s[0] {
+	case ' ', '-', '0', '=', '\t':
+		switch {
+		case n <= len(repeatedSpaces) && HasPrefix(repeatedSpaces, s):
+			return S(repeatedSpaces[:n])
+		case n <= len(repeatedDashes) && HasPrefix(repeatedDashes, s):
+			return S(repeatedDashes[:n])
+		case n <= len(repeatedZeroes) && HasPrefix(repeatedZeroes, s):
+			return S(repeatedZeroes[:n])
+		case n <= len(repeatedEquals) && HasPrefix(repeatedEquals, s):
+			return S(repeatedEquals[:n])
+		case n <= len(repeatedTabs) && HasPrefix(repeatedTabs, s):
+			return S(repeatedTabs[:n])
+		}
 	}
 
 	// Past a certain chunk size it is counterproductive to use
@@ -580,13 +650,7 @@ func Repeat[S String](s S, count int) S {
 	b.Grow(n)
 	b.WriteText(s)
 	for b.Len() < n {
-		chunk := n - b.Len()
-		if chunk > b.Len() {
-			chunk = b.Len()
-		}
-		if chunk > chunkMax {
-			chunk = chunkMax
-		}
+		chunk := min(n-b.Len(), b.Len(), chunkMax)
 		b.WriteText(b.Text()[:chunk])
 	}
 	return b.Text()
@@ -1073,19 +1137,22 @@ func Replace[S1, S2, S3 String](s S1, old S2, new S3, n int) S1 {
 	var b Builder[S1]
 	b.Grow(len(s) + n*(len(new)-len(old)))
 	start := 0
-	for i := 0; i < n; i++ {
-		j := start
-		if len(old) == 0 {
-			if i > 0 {
-				_, wid := utf8.DecodeRune(s[start:])
-				j += wid
-			}
-		} else {
-			j += Index(s[start:], old)
+	if len(old) > 0 {
+		for range n {
+			j := start + Index(s[start:], old)
+			b.WriteText(s[start:j])
+			WriteString(&b, new)
+			start = j + len(old)
 		}
-		b.WriteText(s[start:j])
+	} else { // len(old) == 0
 		WriteString(&b, new)
-		start = j + len(old)
+		for range n - 1 {
+			_, wid := utf8.DecodeRune(s[start:])
+			j := start + wid
+			b.WriteText(s[start:j])
+			WriteString(&b, new)
+			start = j
+		}
 	}
 	b.WriteText(s[start:])
 	return b.Text()
@@ -1106,7 +1173,7 @@ func ReplaceAll[S1, S2, S3 String](s S1, old S2, new S3) S1 {
 func EqualFold[S1, S2 String](s S1, t S2) bool {
 	// ASCII fast path
 	i := 0
-	for ; i < len(s) && i < len(t); i++ {
+	for n := min(len(s), len(t)); i < n; i++ {
 		sr := s[i]
 		tr := t[i]
 		if sr|tr >= utf8.RuneSelf {
